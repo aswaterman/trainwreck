@@ -2,6 +2,9 @@ Trainwreck is the original implementation of RISC-V 1.0.  This repository
 contains the source code, with some technology-specific information redacted.
 There is no build system and no support, and none planned.
 
+Principal authors were Yunsup Lee, Rimas Avizienis, Andrew Waterman, Zhangxi
+Tan, and Christopher Batten.
+
 Unless otherwise stated in a file header, the source code in this repository
 is licensed as follows:
 
