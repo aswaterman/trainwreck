@@ -1,0 +1,779 @@
+
+; © Copyright Microsoft Corporation, 2008
+
+field aoff  19 0;          Define the field offsets for rfref.
+field boff  10 0;
+field woff  28 0;
+
+field instruction 0 0;     Symbolic name for instruction memmory
+field rf 1 0;              Symbolic name for register file
+
+field PC 0 0;              Noise word
+field <= 0 0;              Noise word
+field ,  0 0;              Noise word
+field InData 0 0;          Noise word
+
+field +  0  7;             The "plus" function 
+field -  1  7;             The "minus" function
+field &  2  7;             The "and" function
+field && 3  7;             The "and InData" function
+field |  4  7;             The "or" function
+field |~ 5  7;             The "or not" (nor) function
+field ^  6  7;             The "xor" function
+field &~ 7  7;             The "and not" function
+
+field rcy1  1  5;
+field rcy9  2  5;
+field rcy18 3  5;
+
+field skn 1  2;            Skip if ALU < 0
+field skz 2  2;            Skip if ALU = 0
+field ski 3  2;            Skip if InRdy
+field skp 4  2;            Skip always
+field skge 5  2;           Skip if ALU >= 0
+field sknz 6  2;           Skip if ALU # 0
+field skni 7  2;           Skip if ~InRdy
+
+field ReadX  1 0;          Read RF, addressed by LastALU
+field WriteX 2 0;          Write RF, addressed by LastALU
+field Jump   3 0;          LastALU is unchanged by Jump
+
+;Rw overloads
+field Output  255 28;
+field aOutput 255 19;
+field WriteTrig 254 28;
+field DDRaddr   253 28;			
+
+;--------------------------End of machine description---------------------------
+ 
+mem instruction loc 1;				Set current memory to the IM, location 1.
+
+; Integrated initializer and shell for the BEE3.
+; Initialize the RAMs
+	Output aZero + bZero;          Clear all Output bits 
+	Output aOutput | bTwo;         Inhibit DDR
+	wDelay <= aPwrDly + bZero;     Wait 200 us.
+	Jump aDly + bZero, wRlink <= PC;
+	Output aOutput | bEight;              Toggle ResetDDR
+	wTrash <= aTrash | bTrash;	 Nop so reset lasts 6 clocks
+	wTrash <= aTrash | bTrash;
+	Output aOutput &~ bEight;
+;	Output aOutput &~ bTwo;        Enable DDR
+	Output aOutput | bFour;        DIMM clock on
+	Jump aInitMem + bZero, wRlink4 <= PC;   Initialize memory
+
+	Jump aCalibrate + bZero, wRlink4 <= PC;  Do initial calibration
+	wCalStat <= aDoneS + bZero, skp;            Succeeded
+	wCalStat <= aFailS + bZero;                 Failed            
+
+;Arm the refresh timer and the RS232 receiver.
+	wTrash <= aFour + bZero;       Arm trigger 0 (refresh)
+	WriteTrig <= aZero + bZero;    Any value will do for the first tick.
+	wTrash <= aFour + bTwo;        Arm trigger 2.
+	WriteTrig <= aZero + bZero;
+
+; Print FPGA information
+;	Jump aReadSPD + bZero, wRlink4 <= PC;
+   
+;Calibrate, then print herald
+	Jump aPrintCrlf + bZero, wRlink2 <= PC;
+	wAddr <= aCalS + bZero;                  Print "Cal "
+	Jump aPrintS + bZero, wRlink2 <= PC;
+	wAddr <= aCalStat + bZero;
+	Jump aPrintS + bZero, wRlink2 <= PC;
+	Jump aPrintCrlf + bZero, wRlink2 <= PC;
+	wAddr <= aHerald + bZero;
+	Jump aPrintS + bZero, wRlink2 <= PC;
+
+
+
+shell:	wAddress <= aZero + bZero;       Start the shell.
+	wValue <= aZero + bZero;
+	Jump aPrintCrlf + bZero, wRlink2 <= PC;
+
+
+;	wChar <= aCcha + bZero;
+;	wTrash <= aWhich && InData, skz;       Which TC5?
+;	wChar <= aChar + bOne;
+;	Jump aPrintCh + bZero, wRlink1 <= PC;
+
+	wChar <= aCchQuest - bOne;		'>'
+	Jump aPrintCh + bZero, wRlink1 <= PC;
+	wRadix <= aZero + bZero;              Initialize Radix to zero (decimal), clear Nvalid.
+	wN <= aZero + bZero, skp;             Initialize N, no Echo
+	Jump aPrintCh + bZero, wRlink1 <= PC; N unchanged, echo character
+
+main:   wVector <= aMask2 && InData rcy9, ski; Get the highest priority trigger
+	Jump aMain + bZero, wTrash <= PC;
+	wVector <= aVector + bTrigBase;
+	wVector <= ReadX + bZero;              Indexed Load.  PC of service routine
+	Jump aVector + bZero, wTrash <= PC;    Jump to it.
+  
+
+getChar:	wChar <= aInMask && InData rcy18;   Get a character
+	wTrash <= aChar - bCchSlash, sknz;
+	Jump aOpenCell + bZero, wTrash <= PC;     Open current location (or location N, if Nvalid)
+	wTrash <= aChar - bCchRarw, sknz;         '>'
+	Jump aPrev + bOne, wTrash <= PC;          Open current + 1.
+
+	wTrash <= aChar - bCcht, sknz;
+	Jump aStartTest + bZero, wTrash <= PC;
+	wTrash <= aChar - bCchq, sknz;
+	Jump aQueryFail + bZero, wTrash <= PC;
+	wTrash <= aChar - bCche, sknz;
+	Jump aCompRank3 + bZero, wTrash <= PC;
+
+;	wTrash <= aChar - bCchs, sknz;
+;	Jump aSwitch + bZero, wTrash <= PC;       Switch to other TC5
+
+
+	wTrash <= aChar - bCchLarw, sknz;         '<'
+	Jump aPrev + bZero, wTrash <= PC;         Open current - 1.
+	wTrash <= aCchFF + bOne;                  Enter (avoids another constant)
+	wTrash <= aChar - bTrash, sknz;
+	Jump aCloseCell + bZero, wTrash <= PC;    Close cell, storing N (if valid), else Value.
+	wTrash <= aChar - bCchg, sknz;
+	Jump aGo + bZero, wTrash <= PC;
+	wTrash <= aChar - bCchr, sknz;
+	Jump aCompRadix + bZero, wTrash <= PC;    Complement Radix.
+	wTrash <= aChar - bCchZero, skge;         Check for digits
+	Jump aMain + bZero, wTrash <= PC;         Invalid character. No echo, keep going
+	wTrash <= aChar - bCchColon, skge;
+	Jump aBuildN - bOne, wTrash <= PC;        '0' < Char <= '9'
+	wTrash <= aChar - bCcha, skge;
+	Jump aMain + bZero, wTrash <= PC;         Invalid character. No echo, keep going.
+	wTrash <= aChar - bCchg, skn;
+	Jump aMain + bZero, wTrash <= PC;         Invalid character. No echo, keep going.
+	wDigit <= aChar - bCchW, skp;             Hex digit: Digit <= Char - ('a' - 10);
+	wDigit <= aChar - bCchZero;               Decimal digit
+   
+buildN: wN <= aN + bN;                            N <= N * 2.
+	wDelay <= aN + bN;                        Delay <= N * 4. Delay is a temp.
+	wRankNum <= aDelay + bDelay;              Ranknum <= N * 8 (Another temp).
+	wTrash <= aRadix & bOne, skz;
+	wN <= aRankNum + bRankNum, skp;           Radix is hex. N <= N * 16.
+	wN <= aN + bRankNum;                      Radix is decimal. N <= N * 10.
+	wN <= aN + bDigit;                        Update N.
+	wRadix <= aRadix | bTwo;                  Set Nvalid.
+	Jump aMain - bOne, wTrash <= PC;          Echo, get next character
+
+go:	wTrash <= aRadix & bTwo, skz;             If Nvalid, N replaces Value
+	wValue <= aN + bZero;
+	Jump aValue + bZero, wRlink4 <= PC;       Call the routine
+	wChar <= aCchr + bOne, skp;               Success return. Print 's'.
+	wChar <= aCchg - bOne;                    Fail. Print 'f'.
+	Jump aPrintCh + bZero, wRlink1 <= PC;     Print.
+	Jump aShell + bTwo, wTrash <= PC;         Restart shell (Clear N and Radix, but don't reinitialize Value and Address).
+
+closeCell: wTrash <= aRadix &  bTwo, skz;
+	wValue <= aN + bZero;                     If Nvalid, N replaces Value
+	wAddress <= aAddress + bZero;             Just to get ready for indexed write.	
+	WriteX <= aZero + bValue;                 Indexed write into RF[LastALU]. rW is ignored by the hardware 
+	Jump aShell + bTwo, wTrash <= PC;
+
+compRadix: wRadix <= aRadix ^ bOne;             Invert lsb
+	wTrash <= aRadix & bOne, skz;             Test it
+	wChar <= aCchx + bZero, skp;              Print 'x'
+	wChar <= aCcha + bThree;                  Print 'd'
+	Jump aMain - bOne, wTrash <= PC;          Echo , keep going.
+	
+
+prev:	wValue <= aAddress - bOne, skp;           Open previous address.
+	wValue <= aAddress + bOne;                Open next address.
+	Jump aPrintCh + bZero, wRlink1 <= PC;     Echo '<' or '>'
+	Jump aPrintCrlf + bZero, wRlink2 <= PC;   Print Crlf
+	Jump aOpenCell + bTwo, wTrash <= PC;
+
+openCell: wTrash <= aRadix & bTwo, skz;           Nvalid? 
+	wAddress <= aN + bZero, skp;              If so, N replaces Address
+	wAddress <= aValue + bZero;               Otherwise, Value replaces Address (indirect chains)
+	Jump aPrintCh + bZero, wRlink1 <= PC;     Open Address.  Echo character here
+	wAddress <= aAddress + bZero;             Set up for indexing
+	wValue <= ReadX + bZero;                  Indexed read.  Ra is ignored by the hardware and LastALU is used for Ra
+	wN <= aValue + bZero;                     For printing
+	wTrash <= aRadix & bOne, skz;             Which radix?
+	Jump aPrintHex - bOne, wRlink2 <= PC;     Print N as hex (destroying N).  Skip return.
+	Jump aPrintDec + bZero, wRlink2 <= PC;    Print N as decimal (destroying N).
+	wN <= aZero + bZero;                      Reinitialize N
+	wRadix <= aRadix & bOne;                  Clear Nvalid
+	wChar <= aC32 + bZero;                    Space = 32d;
+	Jump aMain - bOne, wTrash <= PC;          Echo space, get the next character
+
+;switch:	Output <= aOutput | bC2048;               Toggle switch
+;	Output <= aOutput &~ bC2048;
+;	Jump aMain + bZero, wTrash <= PC;
+ 
+;----------------- End of Shell-----------------------------
+
+;Subroutine to delay by 2*n clocks.
+dly:	wDelay <= aDelay - bOne, skz;
+	Jump aDly + bZero, wTrash <= PC;
+	Jump aRlink + bZero, wTrash <= PC;	Return.
+
+;---------------------------Read SPD------------------------------
+
+;Subroutine to read the SPD/RTC data.  This code is for the RTC.
+;The sequence of events is:
+; 1) Send START
+; 2) Select the device for Write, get ACK.
+; 3) Send the byte address (0), get ACK.
+; 3a) RTC only. Send the second address byte (0), get ACK.
+; 4) Send Start;
+; 5) Select the device for Read, get ACK
+; 6) read bytes, sending ACK for each byte except the last.
+; 7) Send Stop;
+; 8) Return
+
+;Initially, SDA = SCL = Z.  Between bits, SCL = Low.
+;Data is sent and received MSB first.
+
+readSPD: Jump aPrintCrlf + bZero, wRlink2 <= PC;       Level 4
+   Jump aSendStart + bZero, wRlink1 <= PC; Send START (1)
+	wData <= aSPDaddress + bZero;		Select the device for Write (2)
+	Jump aSendByte + bZero, wRlink2 <= PC;
+	Jump aGetBit + bZero, wRlink1 <= PC;	Skips if ACK
+	Jump aNoAck + bZero, wTrash <= PC;
+	wData <= aZero + bZero;
+	Jump aSendByte + bZero, wRlink2 <= PC;	Send the address. (3)
+	Jump aGetBit + bZero, wRlink1 <= PC;	Skips if ACK.
+   
+	wData <= aZero + bZero;                Read RTC, so we need two address bytes
+	Jump aSendByte + bZero, wRlink2 <= PC;	Send the address. (3)
+	Jump aGetBit + bZero, wRlink1 <= PC;	Skips if ACK.
+	Jump aNoAck + bZero, wTrash <= PC;
+   
+	Jump aSendStart + bZero, wRlink1 <= PC;	Send Start (4)
+	wData <= aSPDaddress + bOne;		Select the device for Read (5).
+	Jump aSendByte + bZero, wRlink2 <= PC;
+	Jump aGetBit + bZero, wRlink1 <= PC;	Skips if ACK
+	Jump aNoAck + bZero, wTrash <= PC;
+    
+   wCnt <= aSixteen + bZero;                16 character Model
+   Jump aReadBytes + bZero, wRlink3 <= PC;  Acks all bytes except the last.
+   Jump aSendBit - bOne, wRlink1 <= PC; Ack
+   wCnt <= aSixteen + bZero;                16 character Serial #
+   Jump aReadBytes + bZero, wRlink3 <= PC;
+   Jump aSendBit - bOne, wRlink1 <= PC; Ack
+   wCnt <= aSixteen + bTwo;                 18 character MAC address
+   Jump aReadBytes + bZero, wRlink3 <= PC;
+   Jump aSendBit - bOne, wRlink1 <= PC;
+   wCnt <= aOne + bZero;                          1 character FPGA ID
+   Jump aReadBytes + bZero, wRlink3 <= PC;
+   Jump aNoAck + bThree, wTrash <= PC;  Send Stop and return
+
+   Jump aSendBit - bOne, wRlink1 <= PC;           Send ACK
+readBytes: Jump aGetByte + bZero, wRlink2 <= PC;  Level 3.  Char <= byte
+   Jump aPrintCh + bZero, wRlink1 <= PC;          Print it
+   wCnt <= aCnt - bOne, skz;
+   Jump aReadBytes - bOne, wTrash <= PC;
+   Jump aPrintCrlf + bZero, wRlink2 <= PC;
+   Jump aRlink3 + bZero, wTrash <= PC;
+   
+noAck:	wN <= aTrash + bZero; FOR DEBUG.	See who failed to get an ACK
+	Jump aPrintDec + bZero, wRlink2 <= PC;  Print the bad guy's PC.
+	wRlink4 <= aRlink4 + bOne;		Skip return.
+	Jump aSendStop + bZero, wRlink2 <= PC;	Send STOP.
+	Jump aRlink4 + bZero, wTrash <= PC;	Return to shell
+
+sendStart: Output aOutput | bSCLbit;       SCL Low.  Level 1
+   Output aOutput &~ bSDAbit;              SDA Z
+   wDelay <= aHalfBit + bZero;
+	Jump aDly + bZero, wRlink <= PC;        Wait 1/2 bit
+	Output <=  aOutput &~ bSCLbit;          SCL Z
+   wDelay <= aHalfBit + bZero rcy1;
+	Jump aDly + bZero, wRlink <= PC;        Wait 1/4 bit
+	Output <= aOutput | bSDAbit;            SDA Low (Start)
+   wDelay <= aHalfBit + bZero rcy1;
+   Jump aDly + bZero, wRlink <= PC;        Wait 1/4 bit
+	Output <= aOutput | bSCLbit;            SCL Low
+   Output <= aOutput &~ bSDAbit;           SDA Z
+	Jump aRlink1 + bZero, wTrash <= PC;
+
+sendByte: wMask <= aC128 + bZero; Level 2
+	Jump aSendBit + bZero, wRlink1 <= PC;	Send one bit from Data
+	wMask <= aMask + bZero rcy1, skn;      Skip if all bits sent
+	Jump aSendByte + bOne, wTrash <= PC;
+	Jump aRlink2 + bZero, wTrash <= PC;    Return
+
+	wData <= aZero + bZero;                Send ACK. Level 1
+sendBit: wDelay <= aHalfBit + bZero rcy1; Send bit from Data. HalfBit must be even.
+	Jump aDly + bZero, wRlink <= PC;       Wait 1/4 bit
+	wTrash <= aData & bMask, sknz;         Skip if data bit # 0
+	Output <= aOutput | bSDAbit, skp;      Data bit = 0. SDA Low
+	Output <= aOutput &~ bSDAbit;          Data bit = 1. SDA Z
+	wDelay <= aHalfBit + bZero rcy1;        
+	Jump aDly + bZero, wRlink <= PC;    	Wait 1/4 bit
+	Output <= aOutput &~ bSCLbit;		      SCL Z (1)
+	wDelay <= aHalfBit + bZero;
+	Jump aDly + bZero, wRlink <= PC;
+   Output <= aOutput | bSCLbit;            SCL Low
+   Output <= aOutput &~ bSDAbit;           SDA Z
+	Jump aRlink1 + bZero, wTrash <= PC;	Return
+
+getByte: wMask <= aC128 + bZero;           Level 2
+	wChar <= aZero + bZero;
+	Jump aGetBit + bZero, wRlink1 <= PC;    Skips if data = 0
+	wChar <= aChar | bMask;                 Data was 1.  Or in mask bit
+	wMask <= aMask + bZero rcy1, skn;       Skip is all bits in
+	Jump aGetByte + bTwo, wTrash <= PC;
+	Jump aRlink2 + bZero, wTrash <= PC;     Return
+
+getBit: wDelay <= aHalfBit + bZero;
+	Jump aDly + bZero, wRlink <= PC;        Wait 1/2 bit. Level 1
+	Output <= aOutput &~ bSCLbit;           SCL Z
+	wDelay <= aHalfBit + bZero rcy1;
+	Jump aDly + bZero, wRlink <= PC;        Wait 1/4 bit
+	wTrash <= aSDAinBit  && InData, sknz;
+	wRlink1 <= aRlink1 + bOne;              SDAin = 1. Skip return.
+	wDelay <= aHalfBit + bZero rcy1;
+	Jump aDly + bZero, wRlink <= PC;        Wait 1/4 bit
+	Output <= aOutput | bSCLbit;            SCL Low
+	Jump aRlink1 + bZero, wTrash <= PC;     Return
+
+sendStop: Output <= aOutput | bSDAbit;     SDA Low. Level 2.
+	wDelay <= aHalfBit + bZero;
+	Jump aDly + bZero, wRlink <= PC;        Wait 1/2 bit
+	Output <= aOutput &~ bSCLbit;           SCL Z
+   wDelay <= aHalfBit + bZero rcy1;
+	Jump aDly + bZero, wRlink <= PC;        Wait 1/4 bit
+	Output <= aOutput &~ bSDAbit;           SDA Z
+	wDelay <= aHalfBit + bZero rcy1;
+	Jump aDly + bZero, wRlink <= PC;        Wait 1/4 bit
+	Jump aRlink2 + bZero, wTrash <= PC;
+	
+	
+;-----------------Printing to Console------------------------
+;Subroutine to print a number in signed decimal.  Level 2
+printDec: wK <= aEight + bTwo;
+	wBase <= aPow10 + bZero;
+	wTrash <= aN + bZero, skn;               Negative?
+	Jump aPrint + bZero, wTrash <= PC;
+	wN <= aZero - bN;                        Negate N
+	wChar <= aCchMinus + bZero;              Print "-"
+	Jump aPrintCh + bZero, wRlink1 <= PC;
+	Jump aPrint + bZero, wTrash <= PC;
+
+;Subroutine to print a number in hex.  Level 2
+	wRlink2 <= aRlink2 + bOne;               Entry here causes routine to skip return
+printHex: wK <= aEight + bZero;                Normal entry point
+	wBase <= aPow16 + bZero;
+
+;We can't use the trick of negating a negative number to get something that doesn't
+; fall afoul of 2's complemtnt arithmetic, so we'll use an odious hack: 
+;If the number is negative, lop off the sign bit, but correct the first digit printed.
+
+	wTrash <= aN + bZero, skn;
+	Jump aPrint + bZero, wTrash <= PC;       Number is positive. No worries.
+	wN <= aN  & bPosMask;
+	wChar <= aEight + bZero, skp;
+   
+print:  wChar <= aZero + bZero;                Initialize char
+	wAddr <= aK + bBase;                     RF address of next table entry
+	wTvalue <= ReadX + bZero;                Indexed load
+	wTrash <= aN - bTvalue, skn;
+	Jump aReduce + bZero, wRlink1 <= PC;     N >= value, reduce it
+	Jump aPrintDigit + bZero, wRlink1 <= PC; Print character
+	wK <= aK - bOne, skge;                   Get the next Value
+	Jump aRlink2 + bZero, wTrash <= PC;      Last Value done; Return.
+	Jump aPrint + bZero, wTrash <= PC;  
+
+reduce:	wChar <= aChar + bOne;             Reduce N by Tvalue until it is < Value. Level 1.
+	wN <= aN - bTvalue;                      Reduce
+	wTrash <= aN - bTvalue, skn;             N - Tvalue < 0 => N < Value
+	Jump aReduce + bZero, wTrash <= PC;      Do more reduction
+	Jump aRlink1 + bZero, wTrash <= PC;      Return;
+
+;subroutines to print a digit or a character, both in Char.  Level 1.
+printDigit: wTrash <= aEight + bTwo;
+	wTrash <= aChar - bTrash, skge;
+	wChar <= aChar + bCchZero, skp;          Digit is 0..9
+	wChar <= aChar + bCchW;                  Digit is a..f.  Add "a" - 10
+
+printCh: wChar <= aChar | bC256; Level 1
+	wMask <= aC512 - bOne;
+	Output aOutput | bC512;                  Send start bit (0).  Note that this bit is complemented.
+	wTrash <= aZero + bThree, skp;           Read "Now" to arm trigger 1.
+   
+txLoop: wTrash <= aOne + bZero;                Read timer 1 value.
+	wTimer <= aMask10 && InData;
+	wTrash <= aFour + bOne;                  Rearm
+	WriteTrig aTimer + bBitTime;             Write timer value and rearm.
+	Jump aMain + bZero, wTrash <= PC;
+ 
+bitDone: wTrash <= aChar & bMask, sknz;        Done?
+	Jump aCharDone + bZero, wTrash <= PC;    Yes. Return
+	wTrash <= aChar & bOne, skz;
+	Output aOutput &~ bC512, skp;            Send 1
+	Output aOutput | bC512;	                 Send 0
+	wChar <= aChar + bZero rcy1;             Shift
+	Jump aTxLoop + bZero, wTrash <= PC;
+
+charDone: wTrash <= aZero + bOne;              Disarm trigger
+	WriteTrig aZero + bZero;
+	Jump aRlink1 + bZero, wTrash <= PC;      Return to caller
+	
+printCrlf: wChar <= aCchFF + bOne;             Carriage return.  Level 2.
+	Jump aPrintCh + bZero, wRlink1 <= PC;
+	wChar <= aCchFF - bTwo;                  LineFeed
+	Jump aPrintCh + bZero, wRlink1 <= PC;
+	Jump aRlink2 + bZero, wTrash <= PC;
+
+printS:	wValue <= ReadX + bZero;            Next word
+	wCnt <= aThree + bZero;                   4 characters/word
+	wChar <= aValue & bMask9;
+	Jump aPrintCh + bZero, wRlink1 <= PC;
+	wValue <= aValue + bZero rcy9, skge;      A "1" in the top bit means "last character"
+	Jump aRlink2 + bZero, wTrash <= PC;       Return.
+	wCnt <= aCnt - bOne, skn;                 Word done?
+	Jump aPrintS + bTwo, wTrash <= PC;        No.
+	wAddr <= aAddr + bOne;                    Advance to the next word
+	Jump aPrintS + bZero, wTrash <= PC;
+
+;----------------Do a refresh-------------------
+
+rearmRefresh: Output <= aOutput | bTwo;         Disable DDR 
+	wTrash <= aZero + bZero;                  Read timer 0 value.
+	wTimer <= aMask10 && InData;
+	wTrash <= aFour + bZero;                 Set bit 2 to rearm.
+	WriteTrig aTimer + bRefTime;             Write timer value.
+	wTrash <= aTrash + bZero;                Three nops. Drain pipeline
+	wTrash <= aTrash + bZero;
+	wTrash <= aTrash + bZero;
+	wTrash <= aTrash + bZero;
+	DDRaddr <= aPCHallCmd | bRefRank;        Precharge
+	wTrash <= aTrash + bZero;                Two Nops
+	wTrash <= aTrash + bZero;
+	DDRaddr <= aRefCmd | bRefRank;           Refresh
+	Output <= aOutput &~ bTwo;               Enable DDR
+	wRefRank <= aRefRank + bRank1;           Increment the rank
+	wRefRank <= aRefRank & bRank3;           Don't carry
+	Jump aMain + bZero, wTrash <= PC;        Return
+
+;---------------------Memory Initialization-------------------
+
+initMem: wCnt <= aTwo + bOne;                   Initialize four ranks
+	wRankNum <= aZero + bZero;               Initialize rank 0.
+	Jump aInitRank + bZero, wRlink2 <= PC;
+	wRankNum <= aRankNum + bRank1;           Next rank.
+        wCnt <= aCnt - bOne, skn;                Done?
+        Jump aInitMem + bTwo, wTrash <= PC;      No
+	Jump aRlink4 + bZero, wTrash <= PC;      Return
+
+;Subroutine to initialize one rank, given by RankNum	
+initRank: wDelay <= aEight + bTwo;             Wait 400 ns (20 cycles).
+	Jump aDly + bZero, wRlink <= PC;
+	DDRaddr <= aPCHallCmd | bRankNum;        Precharge All
+	wDelay <= aTwo + bZero;                  Wait 4 cycles
+	Jump aDly + bZero, wRlink <= PC;
+	DDRaddr <= aBank2 | bRankNum;            Load EMR2 (with zero).  MRS is command = 0.
+	wTrash <= aTrash + bZero;                Nop
+	DDRaddr <= aBank3 | bRankNum;            Load EMR3 (with zero)
+	wTrash <= aTrash + bZero;                Nop
+	DDRaddr <= aBank1 | bRankNum;            Load EMR (with zero)
+	wTrash <= aTrash + bZero;                Nop
+	DDRaddr <= aMRS1cmd | bRankNum;          Load MR (ResetDLL, BL = 4, sequential burst, CL = 4, normal mode, WR = 4, fast exit)
+	wDelay <= aDLLdelay + bZero;             Wait for DLL to lock.
+	Jump aDly + bZero, wRlink <= PC;
+	Jump aRefresh + bZero, wRlink1 <= PC;    Do a Refresh
+	Jump aRefresh + bZero, wRlink1 <= PC;    Do another
+	DDRaddr <= aMRS2cmd | bRankNum;
+	wTrash <= aTrash + bZero;                Nop
+	DDRaddr <= aMRS3cmd | bRankNum;
+	wTrash <= aTrash + bZero;                Nop
+	DDRaddr <= aMRS4cmd | bRankNum;
+	wDelay <= aEight + bFour;
+	Jump aDly + bZero, wRlink <= PC;         Wait 400ns.
+	DDRaddr <= aPCHallCmd | bRankNum;
+	Jump aRlink2 + bZero, wTrash <= PC;      Return.
+
+refresh: DDRaddr <= aPCHallCmd | bRankNum;        Precharge All
+	wDelay <= aFour + bZero;                  Wait a bit
+	Jump aDly + bZero, wRlink <= PC;
+	DDRaddr <= aRefCmd | bRankNum;           Refresh
+	wDelay <= aEight + bZero;                 Wait tRFC (8 * Ph0 = 32 * MCLK)
+	Jump aDly + bZero, wRlink <= PC;
+	Jump aRlink1 + bZero, wTrash <= PC;
+
+;------------RAM calibration. Adjusts the pin delays-------
+
+calibrate: Output <= aOutput | bCalConst;     Set InhibitDDR and Force
+	wRankNum <= aZero + bRank1;             Calibrate using rank 1
+;	wRankNum <= aZero + bZero;
+	Jump aRefresh + bZero, wRlink1 <= PC;   Refresh to close all banks (waits tRFC before return)
+	DDRaddr <= aWriteCmd | bRankNum;        Activate, write;
+	Output <= aOutput | bOne;               Toggle StartDQcal
+        Output <= aOutput &~ bOne;
+	wCnt <= aC32 + bC32;                    Do 64 reads
+   
+rloop:	DDRaddr <= aReadCmd | bRankNum;
+	wCnt <= aCnt - bOne, skz;
+	Jump aRloop + bZero, wTrash <= PC;
+	wDelay <= aSixteen + bZero;             Wait for calibration to finish.
+	Jump aDly + bZero, wRlink <= PC;
+	Jump aRefresh + bZero, wRlink1 <= PC;   Do a refresh to close the bank
+	Output <= aOutput &~ bCalConst;         Enable DDR, clear Force
+	wTrash <= aFail && InData, skz;         Skip if success
+	Jump aRlink4 + bOne, wTrash <= PC;
+
+	wCnt <= aTapBias + bZero;		Toggle IncDly TapBias times
+rloopa: wCnt <= aCnt - bOne, skge;
+	Jump aRlink4 + bZero, wTrash <= PC;
+	Output <= aOutput | bC256;
+	Output <= aOutput &~ bC256;
+	Jump aRloopa + bZero, wTrash <= PC;
+
+;-----------------Run the RAM Tester------------------
+startTest: Jump aPrintCh + bZero, wRlink1 <= PC; Echo
+	wTrash <= aThree + bZero rcy9;     
+	Output <= aOutput &~ bTrash;            Clear previously set testConf bits (if any)
+	wTrash <= aTestConf + bZero rcy9;       Bits to set for this test
+	Output <= aOutput | bTrash;             Set them  
+	Output <= aOutput | bSixteen;           Toggle Start
+	wTrash <= aBurstLength + bZero;         Put BurstLength into LastALU for tester.
+	Output <= aOutput &~ bSixteen;
+	Jump aShell + bTwo; wTrash <= PC;
+
+queryFail: Jump aPrintCh + bZero, wRlink1 <= PC; Echo
+	wTrash <= aHoldFail && InData, sknz;
+	Jump aShell + bTwo; wTrash <= PC;
+	Jump aPrintCrlf + bZero, wRlink2 <= PC;
+	wCnt1 <= aFour + bTwo;                   Print 6 words
+   
+getXDword: wCnt <= aFour + bZero;              Four (8 bit) bytes per word
+      wN <= aZero + bZero;
+      
+getXDbyte: 	wTrash <= aXDmask && InData rcy9;  Incoming data is into bits 25:18
+	wTrash <= aTrash + bZero rcy18;          Incoming data is into bits 7:0
+	wN <= aN | bTrash rcy9;                  OR into partially assembled word
+	wN <= aN + bN;                           N <= N lsh 1. Incoming data is in bits 35:28
+	wCnt <= aCnt - bOne, skz;
+	Jump aGetXDbyte + bZero, wTrash <= PC;
+	wN <= aN + bZero rcy1;                   Final 32-bit word is in bits 35:4. Must rsh 4.
+	wN <= aN + bZero rcy1;
+	wN <= aN + bZero rcy1;
+	wN <= aN + bZero rcy1;
+	Jump aPrintHex + bZero, wRlink2 <= PC;
+	Jump aPrintCrlf + bZero, wRlink2 <= PC;
+	wCnt1 <= aCnt1 - bOne, skz;
+	Jump aGetXDword + bZero, wTrash <= PC;
+	Jump aShell + bTwo; wTrash <= PC;
+
+compRank3:Jump aPrintCh + bZero, wRlink1 <= PC; Echo
+	wTrash <= aC512 + bC512;
+	Output <= aOutput ^ bTrash;             Complement "KillRank3"
+	Jump aShell + bTwo; wTrash <= PC;
+
+;-------End of Instruction Memory--------------------------
+	
+mem rf loc 0;					;Switch to Register File
+
+;Variables and temps in the low 256 locations.
+LocZero: 0;
+;Return links, trash register
+Rlink: 0;
+Rlink1: 0;
+Rlink2: 0;
+Rlink3: 0;
+Rlink4: 0;					Special return for shell-called routines.
+Trash: 0;					Destination for unwanted ALU values.
+ 
+;Tempory variables (subroutine arguments)
+Delay:    0;					Holds dly count
+RankNum:  0;
+RefRank:  0;
+Addr:     0;
+Cnt:      0;
+Cnt1:     0;
+Bcnt:     0;
+Pattern:  0;
+Data:     0;
+Mask:     0;
+Radix:    0;
+Address:  0;
+Value:    0;
+Digit:    0;
+MemData:  0;
+Vector:   0;
+Timer:    0;
+
+;The following are used in printing
+N:        0;   Number to print
+K:        0;   Index into power table
+Base:     0;   Base of table
+Tvalue:   0;   Current table value
+Char:     0;   Character to print
+CalStat:  0;
+
+
+loc 256;
+;Read-only constants in the high 256 locations.
+TestConf: 3;
+BurstLength: 31;
+TapBias: 0;
+pow10:	1;
+	10;
+	100;
+	1000;
+	10000;
+	100000;
+	1000000;
+	10000000;
+	100000000;
+	1000000000;
+	10000000000;
+pow16:  1;
+	0x10;
+	0x100;
+	0x1000;
+	0x10000;
+	0x100000;
+	0x1000000;
+	0x10000000;
+	0x100000000;
+
+Zero: 0; 275
+One: 1;
+Two: 2;
+Three: 3;
+Four: 4;
+Eight: 8;
+Sixteen: 16;
+C32: 32;
+C128: 128;
+C256: 256;
+C512: 512;
+C2048: 2048;
+Mask2: 0x600;
+Mask9: 0x1ff;
+Mask10: 0x3ff;
+Which: 0x4000;    bit 14
+Fail:     0b100000000000;
+HoldFail: 0b1000000000000;
+CalConst: 0x82;
+XDmask: 0x7f8000000;
+
+Rank1:     0x4000000;
+Rank2:     0x8000000;
+Rank3:     0xc000000;
+
+Bank1:     0x380000200;  cmd = MRSCmd, altCmd = NopCmd
+Bank2:     0x380000400;
+Bank3:     0x380000600;
+
+PCHallCmd: 0x3a0400000;  cmd = PrechargeCmd, altCmd = NopCmd;
+RefCmd:    0x390000000;  cmd = RefreshCmd,   altCmd = NopCmd;
+WriteCmd:  0x230000000;  cmd = ActiveCmd, altCmd = WriteCmd;
+ReadCmd:   0x3d0000000;  cmd = ReadCmd, altCmd = NopCmd;
+
+MRS1cmd:   0x380742000;  ResetDLL, BL = 4, sequential burst, CL = 4, normal mode, WR = 4, fast exit
+MRS2cmd:   0x380642000;  BL = 4, sequential burst, CL = 4, normal mode, WR = 4, fast exit
+MRS3cmd:   0x3803d8200;  Enable DLL, Rtt = 150, AL = 3, default OCD, DQS enabled, RDQS disabled, outputs enabled
+MRS4cmd:   0x380058200;  Enable DLL, Rtt = 150, AL = 3, OCD exit,    DQS enabled, RDQS disabled, outputs enabled
+
+;Constants representing ASCII characters.
+CchFF: 12;
+CchPlus: 43;
+CchMinus: 45;
+CchSlash: 47;
+CchZero: 48;
+CchColon: 58;
+CchQuest: 63;
+CchW: 87;        also 'a' - 10
+Ccha: 97;
+Cche: 101;
+Cchg: 103;
+Cchq: 113;
+Cchr: 114;
+Cchs: 115;
+Ccht: 116;
+Cchx: 120;
+CchLarw: 60;
+CchRarw: 62;
+
+trigBase:  rearmRefresh; //PC for event trigger 0
+           bitDone; //PC for event trigger 1
+           getChar;
+
+herald:	0x19994ca42; "Bee3"
+	0x329a0a620; " She"
+	0x2d86c;     "ll--"
+calS: 0x901b0c243;  "Cal "
+failS: 0xb61a4c246; "Fail"
+doneS: 0xb29b8de44; "Done" 
+
+PosMask: 0x7ffffffff;
+;BitTime: 565;		266 MHz
+;BitTime: 579;     579 * 15ns (MCLK/4) = 8.68 us
+;BitTime: 542;         542 * 16 ns (MCLK/4) = 8.68 us (115,200 bps).  This is the value for 5/2 * 100 = 250  MHz
+BitTime: 506;         233 MHz 
+;BitTime: 489;          225 MHz
+;BitTime: 434;          200 MHz
+;RefTime: 125;         125 * 16 ns = 2.00 us (refresh interval, 250 MHz)
+;RefTime: 125;
+;RefTime:  133;		266 MHz
+RefTime: 117;          233 MHz
+;RefTime: 100;          200 MHz
+InMask: 0x3fc0000;    8 bits in left halfword.
+PwrDly: 6700;
+DLLdelay: 50;
+
+SPDaddress: 0b10101110;		RTC address
+HalfBit:  42;					42 * 2 * 15ns = 1.26 us. 400 KHz is 2.5 us.
+SDAbit: 0x20; 
+SCLbit: 0x40;
+SDAinBit: 0x2000;
+
+
+
+;Locations representing label locations in IM or RF.
+Pow10: pow10;
+Pow16: pow16;
+TrigBase: trigBase;
+Herald: herald;
+CalS: calS;
+FailS: failS;
+DoneS: doneS;
+Shell: shell;
+Main:  main;
+GetChar: getChar;
+BuildN: buildN;
+Go: go;
+CloseCell: closeCell;
+CompRadix: compRadix;
+Prev: prev;
+OpenCell: openCell;
+Dly: dly;
+PrintDec: printDec;
+PrintHex: printHex;
+Print: print;
+Reduce: reduce;
+PrintDigit: printDigit;
+PrintCh: printCh;
+TxLoop: txLoop;
+CharDone: charDone;
+PrintCrlf: printCrlf;
+PrintS: printS;
+InitMem: initMem;
+InitRank: initRank;
+Refresh: refresh;
+Calibrate: calibrate;
+Rloop: rloop;
+Rloopa: rloopa;
+StartTest: startTest;
+QueryFail: queryFail;
+;Switch: switch;
+GetXDbyte: getXDbyte;
+GetXDword: getXDword;
+CompRank3: compRank3;
+ReadSPD: readSPD;
+SendStart: sendStart;
+SendByte: sendByte;
+NoAck: noAck;
+SendBit: sendBit;
+ReadBytes: readBytes;
+GetByte: getByte;
+GetBit: getBit;
+SendStop: sendStop;
+
+
+end

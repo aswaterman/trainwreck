@@ -1,0 +1,5 @@
+#!/bin/sh
+echo "***********Remember to modify the rfa_mem/rfb_mem for using RAMB18SDP**********"
+data2mem -bm im.bmm -bd mem0.mem -o v ../im_mem.v
+data2mem -bm rfa.bmm -bd mem1.mem -o v ../rfa_mem.v
+data2mem -bm rfb.bmm -bd mem1.mem -o v ../rfb_mem.v

@@ -1,0 +1,6 @@
+`ifndef RISCV_SCALAR_ONLY_VH
+`define RISCV_SCALAR_ONLY_VH
+
+`define SCALAR_ONLY
+
+`endif // RISCV_SCALAR_ONLY_VH

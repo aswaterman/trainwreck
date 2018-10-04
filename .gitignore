@@ -1,0 +1,17 @@
+simv
+simv.daidir/
+vc_hdrs.h
+ucli.key
+build/vlsi/vcs-sim-rtl/
+!build/vlsi/vcs-sim-rtl/Makefile
+build/fpga/vcs-sim-rtl/
+!build/fpga/vcs-sim-rtl/Makefile
+build/vlsi/vcs-sim-gl-syn/
+!build/vlsi/vcs-sim-gl-syn/Makefile
+!build/vlsi/vcs-sim-gl-syn/run.tcl
+build/vlsi/dc-syn*/build-dc-*/
+build/vlsi/dc-syn*/current-dc
+riscv-bmarks/*.riscv
+riscv-bmarks/*.dump
+riscv-bmarks/*.out
+riscv-bmarks/*.o
